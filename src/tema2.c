@@ -21,11 +21,11 @@
  *   - mesaje cu tag-urile TAG_LOOKUP_REQ, TAG_LOOKUP_REP și TAG_DONE
  ************************************************************/
 
+#include <math.h>
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 #define M 4 // 2^m = 16 ID-uri posibile
 #define RING_SIZE 16
 #define MAX_NODES 32
@@ -116,10 +116,7 @@ int rank_from_id(int id)
 /************************************************************
  * Construirea inelului CHORD static
  ************************************************************/
-int cmp_int(const void *a, const void *b)
-{
-	return (*(int *)a - *(int *)b);
-}
+int cmp_int(const void *a, const void *b) { return (*(int *)a - *(int *)b); }
 
 void build_global_ring()
 {
@@ -265,8 +262,8 @@ void handle_lookup_request(LookupMsg *msg)
 		int initiator_rank = rank_from_id(msg->initiator_id);
 		if (initiator_rank != -1)
 		{
-			MPI_Send(msg, sizeof(LookupMsg), MPI_BYTE, initiator_rank,
-					 TAG_LOOKUP_REP, MPI_COMM_WORLD);
+			MPI_Send(msg, sizeof(LookupMsg), MPI_BYTE, initiator_rank, TAG_LOOKUP_REP,
+					 MPI_COMM_WORLD);
 		}
 	}
 	else
@@ -281,32 +278,7 @@ void handle_lookup_request(LookupMsg *msg)
 		}
 	}
 }
-void handle_lookup_response(LookupMsg *msg, int *counter_lookups, int target_lookups, int w_size)
-{
-	printf("Lookup %d: ", msg->key);
 
-	int idx = 0;
-	while (idx < msg->path_len)
-	{
-		printf("%d", msg->path[idx]);
-		if (idx < msg->path_len - 1)
-		{
-			printf(" -> ");
-		}
-		idx++;
-	}
-	printf("\n");
-
-	(*counter_lookups)++;
-
-	if (*counter_lookups == target_lookups)
-	{
-		for (int node = 0; node < w_size; node++)
-		{
-			MPI_Send(NULL, 0, MPI_BYTE, node, TAG_DONE, MPI_COMM_WORLD);
-		}
-	}
-}
 int main(int argc, char **argv)
 {
 
@@ -338,9 +310,7 @@ int main(int argc, char **argv)
 	/******************************************************
 	 * Distribuirea ID-urilor tuturor nodurilor
 	 ******************************************************/
-	MPI_Allgather(&self.id, 1, MPI_INT,
-				  all_ids, 1, MPI_INT,
-				  MPI_COMM_WORLD);
+	MPI_Allgather(&self.id, 1, MPI_INT, all_ids, 1, MPI_INT, MPI_COMM_WORLD);
 
 	build_id_maps();
 	build_global_ring();
@@ -355,10 +325,9 @@ int main(int argc, char **argv)
 	 *       - construiți LookupMsg
 	 *       - trimiteți un mesaj de tip TAG_LOOKUP_REQ către propriul rank
 	 ************************************************************/
-	for (int i = 0; i < nr_lookups; i++)
+	if (nr_lookups > 0)
 	{
-		int key = lookups[i];
-
+		int key = lookups[0];
 		LookupMsg msg;
 		msg.initiator_id = self.id;
 		msg.current_id = self.id;
@@ -368,8 +337,6 @@ int main(int argc, char **argv)
 		MPI_Send(&msg, sizeof(LookupMsg), MPI_BYTE, world_rank, TAG_LOOKUP_REQ,
 				 MPI_COMM_WORLD);
 	}
-
-	free(lookups);
 
 	/************************************************************
 	 * TODO 5 - service-loop distribuit
@@ -399,7 +366,8 @@ int main(int argc, char **argv)
 		LookupMsg incoming_msg;
 		MPI_Status current_status;
 
-		MPI_Recv(&incoming_msg, sizeof(LookupMsg), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &current_status);
+		MPI_Recv(&incoming_msg, sizeof(LookupMsg), MPI_BYTE, MPI_ANY_SOURCE,
+				 MPI_ANY_TAG, MPI_COMM_WORLD, &current_status);
 
 		switch (current_status.MPI_TAG)
 		{
@@ -408,7 +376,36 @@ int main(int argc, char **argv)
 			break;
 
 		case TAG_LOOKUP_REP:
-			handle_lookup_response(&incoming_msg, &my_lookups_done, nr_lookups, world_size);
+			printf("Lookup %d: ", incoming_msg.key);
+			for (int k = 0; k < incoming_msg.path_len; k++)
+			{
+				printf("%d", incoming_msg.path[k]);
+				if (k < incoming_msg.path_len - 1)
+					printf(" -> ");
+			}
+			printf("\n");
+
+			my_lookups_done++;
+
+			if (my_lookups_done < nr_lookups)
+			{
+				int key = lookups[my_lookups_done];
+				LookupMsg next_msg;
+				next_msg.initiator_id = self.id;
+				next_msg.current_id = self.id;
+				next_msg.key = key;
+				next_msg.path_len = 0;
+
+				MPI_Send(&next_msg, sizeof(LookupMsg), MPI_BYTE, world_rank,
+						 TAG_LOOKUP_REQ, MPI_COMM_WORLD);
+			}
+			else
+			{
+				for (int r = 0; r < world_size; r++)
+				{
+					MPI_Send(NULL, 0, MPI_BYTE, r, TAG_DONE, MPI_COMM_WORLD);
+				}
+			}
 			break;
 
 		case TAG_DONE:
@@ -420,6 +417,7 @@ int main(int argc, char **argv)
 		}
 	}
 
+	free(lookups);
 	MPI_Finalize();
 	return 0;
 }
